@@ -1,6 +1,25 @@
 const formatMoney = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 const getID = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
+const STORAGE_KEYS = {
+    services: 'obras_services',
+    budgets: 'obras_budgets',
+    financials: 'obras_financials',
+    workers: 'obras_workers',
+    workLogs: 'obras_workLogs',
+    vales: 'obras_vales',
+    currentDraft: 'obras_currentBudgetDraft'
+};
+
+const loadJSON = (key, fallback) => {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+    } catch {
+        return fallback;
+    }
+};
+
 const initialServices = [
     { id: 1, desc: 'Diária Pedreiro', unit: 'dia', value: 200.00 },
     { id: 2, desc: 'Diária Servente', unit: 'dia', value: 120.00 },
@@ -10,15 +29,16 @@ const initialServices = [
 ];
 
 let state = {
-    services: JSON.parse(localStorage.getItem('obras_services')) || initialServices,
-    savedBudgets: JSON.parse(localStorage.getItem('obras_budgets')) || [],
-    financials: JSON.parse(localStorage.getItem('obras_financials')) || [],
-    workers: JSON.parse(localStorage.getItem('obras_workers')) || [],
-    workLogs: JSON.parse(localStorage.getItem('obras_workLogs')) || [],
-    vales: JSON.parse(localStorage.getItem('obras_vales')) || []
+    services: loadJSON(STORAGE_KEYS.services, initialServices),
+    savedBudgets: loadJSON(STORAGE_KEYS.budgets, []),
+    financials: loadJSON(STORAGE_KEYS.financials, []),
+    workers: loadJSON(STORAGE_KEYS.workers, []),
+    workLogs: loadJSON(STORAGE_KEYS.workLogs, []),
+    vales: loadJSON(STORAGE_KEYS.vales, [])
 };
 
-let currentBudgetItems = [];
+const budgetDraft = loadJSON(STORAGE_KEYS.currentDraft, { client: '', project: '', items: [] });
+let currentBudgetItems = Array.isArray(budgetDraft.items) ? budgetDraft.items : [];
 
 window.switchTab = (tabName) => {
     document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
@@ -40,12 +60,18 @@ window.switchTab = (tabName) => {
 };
 
 const saveData = () => {
-    localStorage.setItem('obras_services', JSON.stringify(state.services));
-    localStorage.setItem('obras_budgets', JSON.stringify(state.savedBudgets));
-    localStorage.setItem('obras_financials', JSON.stringify(state.financials));
-    localStorage.setItem('obras_workers', JSON.stringify(state.workers));
-    localStorage.setItem('obras_workLogs', JSON.stringify(state.workLogs));
-    localStorage.setItem('obras_vales', JSON.stringify(state.vales));
+    localStorage.setItem(STORAGE_KEYS.services, JSON.stringify(state.services));
+    localStorage.setItem(STORAGE_KEYS.budgets, JSON.stringify(state.savedBudgets));
+    localStorage.setItem(STORAGE_KEYS.financials, JSON.stringify(state.financials));
+    localStorage.setItem(STORAGE_KEYS.workers, JSON.stringify(state.workers));
+    localStorage.setItem(STORAGE_KEYS.workLogs, JSON.stringify(state.workLogs));
+    localStorage.setItem(STORAGE_KEYS.vales, JSON.stringify(state.vales));
+};
+
+const persistCurrentBudgetDraft = () => {
+    const client = document.getElementById('client-name')?.value || '';
+    const project = document.getElementById('client-project')?.value || '';
+    localStorage.setItem(STORAGE_KEYS.currentDraft, JSON.stringify({ client, project, items: currentBudgetItems }));
 };
 
 const renderServices = () => {
@@ -104,20 +130,25 @@ const renderCurrentBudget = () => {
     });
 
     totalEl.innerText = formatMoney(total);
+    persistCurrentBudgetDraft();
 };
 
 document.getElementById('btn-reset-app').addEventListener('click', () => {
     if(confirm('Limpar todos os dados do app?')) { 
-        localStorage.clear(); 
+        Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
         location.reload(); 
     }
 });
 
 document.getElementById('form-add-service').addEventListener('submit', (e) => {
     e.preventDefault();
-    const desc = document.getElementById('service-desc').value;
-    const unit = document.getElementById('service-unit').value;
+    const desc = document.getElementById('service-desc').value.trim();
+    const unit = document.getElementById('service-unit').value.trim();
     const value = parseFloat(document.getElementById('service-value').value);
+
+    if(!desc || !unit || !Number.isFinite(value) || value <= 0) {
+        return alert('Preencha descrição, unidade e um valor válido maior que zero.');
+    }
     
     state.services.push({ id: Date.now(), desc, unit, value });
     saveData();
@@ -137,8 +168,11 @@ document.getElementById('form-add-item').addEventListener('submit', (e) => {
     e.preventDefault();
     const serviceId = document.getElementById('budget-service-select').value;
     const qty = parseFloat(document.getElementById('budget-item-qty').value);
+    const serviceExists = state.services.some((serv) => String(serv.id) === String(serviceId));
     
-    if(!serviceId || !qty) return;
+    if(!serviceId || !serviceExists || !Number.isFinite(qty) || qty <= 0) {
+        return alert('Selecione um serviço e informe uma quantidade válida maior que zero.');
+    }
 
     currentBudgetItems.push({ serviceId, qty });
     renderCurrentBudget();
@@ -327,8 +361,12 @@ const renderFinancials = () => {
 document.getElementById('form-add-fin').addEventListener('submit', (e) => {
     e.preventDefault();
     const type = document.getElementById('fin-type').value;
-    const desc = document.getElementById('fin-desc').value;
+    const desc = document.getElementById('fin-desc').value.trim();
     const val = parseFloat(document.getElementById('fin-val').value);
+
+    if(!desc || (type !== 'in' && type !== 'out') || !Number.isFinite(val) || val <= 0) {
+        return alert('Informe tipo, descrição e valor válido maior que zero.');
+    }
     
     state.financials.unshift({
         id: getID(),
@@ -419,8 +457,12 @@ const renderWorkers = () => {
 
 document.getElementById('form-add-worker').addEventListener('submit', (e) => {
     e.preventDefault();
-    const name = document.getElementById('worker-name').value;
+    const name = document.getElementById('worker-name').value.trim();
     const rate = parseFloat(document.getElementById('worker-rate').value);
+
+    if(!name || !Number.isFinite(rate) || rate <= 0) {
+        return alert('Informe um nome e valor de diária válido maior que zero.');
+    }
 
     state.workers.push({ id: getID(), name, rate });
     saveData();
@@ -468,4 +510,10 @@ window.deleteWorker = (id) => {
 };
 
 renderServices();
+
+document.getElementById('client-name').value = budgetDraft.client || '';
+document.getElementById('client-project').value = budgetDraft.project || '';
+document.getElementById('client-name').addEventListener('input', persistCurrentBudgetDraft);
+document.getElementById('client-project').addEventListener('input', persistCurrentBudgetDraft);
+
 renderCurrentBudget();
