@@ -8,7 +8,8 @@ const STORAGE_KEYS = {
     workers: 'obras_workers',
     workLogs: 'obras_workLogs',
     vales: 'obras_vales',
-    currentDraft: 'obras_currentBudgetDraft'
+    currentDraft: 'obras_currentBudgetDraft',
+    companyLogo: 'obras_companyLogo'
 };
 
 const loadJSON = (key, fallback) => {
@@ -34,7 +35,8 @@ let state = {
     financials: loadJSON(STORAGE_KEYS.financials, []),
     workers: loadJSON(STORAGE_KEYS.workers, []),
     workLogs: loadJSON(STORAGE_KEYS.workLogs, []),
-    vales: loadJSON(STORAGE_KEYS.vales, [])
+    vales: loadJSON(STORAGE_KEYS.vales, []),
+    companyLogo: localStorage.getItem(STORAGE_KEYS.companyLogo) || ''
 };
 
 const budgetDraft = loadJSON(STORAGE_KEYS.currentDraft, { client: '', project: '', items: [] });
@@ -66,6 +68,82 @@ const saveData = () => {
     localStorage.setItem(STORAGE_KEYS.workers, JSON.stringify(state.workers));
     localStorage.setItem(STORAGE_KEYS.workLogs, JSON.stringify(state.workLogs));
     localStorage.setItem(STORAGE_KEYS.vales, JSON.stringify(state.vales));
+    if(state.companyLogo) localStorage.setItem(STORAGE_KEYS.companyLogo, state.companyLogo);
+    else localStorage.removeItem(STORAGE_KEYS.companyLogo);
+};
+
+const renderCompanyLogo = () => {
+    const preview = document.getElementById('company-logo-preview');
+    const empty = document.getElementById('company-logo-empty');
+    const removeBtn = document.getElementById('btn-remove-logo');
+
+    if(!preview || !empty || !removeBtn) return;
+
+    if(state.companyLogo) {
+        preview.src = state.companyLogo;
+        preview.classList.remove('hidden');
+        empty.classList.add('hidden');
+        removeBtn.classList.remove('hidden');
+    } else {
+        preview.removeAttribute('src');
+        preview.classList.add('hidden');
+        empty.classList.remove('hidden');
+        removeBtn.classList.add('hidden');
+    }
+};
+
+const resizeImageFile = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+            const maxSide = 900;
+            const ratio = Math.min(1, maxSide / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(img.width * ratio));
+            canvas.height = Math.max(1, Math.round(img.height * ratio));
+
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+    };
+
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+});
+
+const dataURLToFile = (dataURL, filename) => {
+    const [header, base64] = dataURL.split(',');
+    const mimeMatch = header.match(/data:(.*?);base64/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+
+    for(let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+
+    return new File([bytes], filename, { type: mime });
+};
+
+const shareBudgetWithLogo = async (msg) => {
+    const logoFile = dataURLToFile(state.companyLogo, 'logo-da-empresa.png');
+    const shareData = {
+        title: 'Orçamento de Obra',
+        text: msg,
+        files: [logoFile]
+    };
+
+    if(navigator.share && navigator.canShare && navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        return true;
+    }
+
+    return false;
 };
 
 const persistCurrentBudgetDraft = () => {
@@ -217,7 +295,33 @@ document.getElementById('btn-save-budget').addEventListener('click', () => {
     alert('Orçamento salvo no Histórico! 📂');
 });
 
-document.getElementById('btn-whatsapp').addEventListener('click', () => {
+document.getElementById('company-logo-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+
+    if(!file.type.startsWith('image/')) {
+        e.target.value = '';
+        return alert('Selecione uma imagem válida para a logo.');
+    }
+
+    try {
+        state.companyLogo = await resizeImageFile(file);
+        saveData();
+        renderCompanyLogo();
+    } catch {
+        alert('Não foi possível carregar a logo. Tente outra imagem.');
+    } finally {
+        e.target.value = '';
+    }
+});
+
+document.getElementById('btn-remove-logo').addEventListener('click', () => {
+    state.companyLogo = '';
+    saveData();
+    renderCompanyLogo();
+});
+
+document.getElementById('btn-whatsapp').addEventListener('click', async () => {
     if(currentBudgetItems.length === 0) return alert('Adicione itens ao orçamento!');
     
     const client = document.getElementById('client-name').value || 'Cliente';
@@ -251,6 +355,17 @@ document.getElementById('btn-whatsapp').addEventListener('click', () => {
     msg += `─────────────────────\n\n`;
     if(footer) msg += `${footer}`;
     
+    if(state.companyLogo) {
+        try {
+            const shared = await shareBudgetWithLogo(msg);
+            if(shared) return;
+        } catch {
+            return;
+        }
+
+        alert('Este navegador não permite anexar a logo automaticamente. Vou abrir o WhatsApp com o texto do orçamento; anexe a logo manualmente.');
+    }
+
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
 });
 
@@ -510,6 +625,7 @@ window.deleteWorker = (id) => {
 };
 
 renderServices();
+renderCompanyLogo();
 
 document.getElementById('client-name').value = budgetDraft.client || '';
 document.getElementById('client-project').value = budgetDraft.project || '';

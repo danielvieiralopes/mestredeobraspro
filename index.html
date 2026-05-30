@@ -86,6 +86,19 @@
                     </summary>
                     <div class="mt-2 space-y-3">
                         <div>
+                            <label class="block text-[10px] uppercase font-bold text-gray-500 mb-1">Logo da Empresa</label>
+                            <div class="flex items-center gap-3">
+                                <div class="w-14 h-14 rounded border border-dashed border-gray-300 bg-white flex items-center justify-center overflow-hidden">
+                                    <img id="company-logo-preview" alt="Logo da empresa" class="hidden w-full h-full object-contain">
+                                    <span id="company-logo-empty" class="text-[10px] text-gray-400 text-center px-1">Sem logo</span>
+                                </div>
+                                <div class="flex-1 space-y-2">
+                                    <input type="file" id="company-logo-input" accept="image/*" class="w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700 file:font-bold">
+                                    <button type="button" id="btn-remove-logo" class="hidden text-xs text-red-500 underline">Remover logo</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
                             <label class="block text-[10px] uppercase font-bold text-gray-500 mb-1">Texto de Introdução</label>
                             <input type="text" id="msg-intro" value="Olá segue o orçamento conforme combinado!" class="w-full p-2 border rounded text-xs text-gray-700 bg-white">
                         </div>
