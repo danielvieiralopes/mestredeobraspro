@@ -116,26 +116,237 @@ const resizeImageFile = (file) => new Promise((resolve, reject) => {
     reader.readAsDataURL(file);
 });
 
-const dataURLToFile = (dataURL, filename) => {
-    const [header, base64] = dataURL.split(',');
-    const mimeMatch = header.match(/data:(.*?);base64/);
-    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
+const loadImageFromDataURL = (dataURL) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataURL;
+});
 
-    for(let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-    }
+const canvasToFile = (canvas, filename) => new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+        if(!blob) {
+            reject(new Error('Falha ao gerar imagem.'));
+            return;
+        }
 
-    return new File([bytes], filename, { type: mime });
+        resolve(new File([blob], filename, { type: 'image/png' }));
+    }, 'image/png', 0.95);
+});
+
+const wrapCanvasText = (ctx, text, x, y, maxWidth, lineHeight) => {
+    const lines = String(text || '').split('\n');
+    let currentY = y;
+
+    lines.forEach((line) => {
+        const words = line.split(' ');
+        let builtLine = '';
+
+        words.forEach((word) => {
+            const testLine = builtLine ? `${builtLine} ${word}` : word;
+            if(ctx.measureText(testLine).width > maxWidth && builtLine) {
+                ctx.fillText(builtLine, x, currentY);
+                builtLine = word;
+                currentY += lineHeight;
+            } else {
+                builtLine = testLine;
+            }
+        });
+
+        if(builtLine) ctx.fillText(builtLine, x, currentY);
+        currentY += lineHeight;
+    });
+
+    return currentY;
 };
 
-const shareBudgetWithLogo = async (msg) => {
-    const logoFile = dataURLToFile(state.companyLogo, 'logo-da-empresa.png');
+const fitCanvasText = (ctx, text, maxWidth) => {
+    const value = String(text || '');
+    if(ctx.measureText(value).width <= maxWidth) return value;
+
+    let fitted = value;
+    while(fitted.length > 1 && ctx.measureText(`${fitted}...`).width > maxWidth) {
+        fitted = fitted.slice(0, -1);
+    }
+
+    return `${fitted}...`;
+};
+
+const getCurrentBudgetDetails = () => {
+    let total = 0;
+    const items = currentBudgetItems.map(item => {
+        const service = state.services.find(serv => serv.id == item.serviceId);
+        if(!service) return null;
+
+        const subtotal = item.qty * service.value;
+        total += subtotal;
+
+        return {
+            desc: service.desc,
+            unit: service.unit,
+            qty: item.qty,
+            value: service.value,
+            subtotal
+        };
+    }).filter(Boolean);
+
+    return { items, total };
+};
+
+const buildBudgetMessage = ({ hidePrices = false } = {}) => {
+    const client = document.getElementById('client-name').value || 'Cliente';
+    const project = document.getElementById('client-project').value || 'Obra';
+    const intro = document.getElementById('msg-intro').value;
+    const footer = document.getElementById('msg-footer').value;
+    const date = new Date().toLocaleDateString('pt-BR');
+    const { items, total } = getCurrentBudgetDetails();
+
+    let msg = hidePrices ? `*🏗 QUANTITATIVO DE OBRA 🏗*\n\n` : `*🏗 ORÇAMENTO DE OBRA 🏗*\n\n`;
+    if(intro) msg += `${intro}\n\n`;
+
+    msg += `👤 Cliente: ${client}\n`;
+    msg += `🏠 Obra: ${project}\n`;
+    msg += `📅 Data: ${date}\n\n`;
+    msg += `📋 DETALHAMENTO DOS SERVIÇOS:\n\n`;
+
+    items.forEach((item) => {
+        msg += `🔸 ${item.desc}\n`;
+        if(hidePrices) {
+            msg += `   Quantidade: ${item.qty} ${item.unit}\n\n`;
+        } else {
+            msg += `   ${item.qty} ${item.unit} x ${formatMoney(item.value)}\n`;
+            msg += `   Subtotal: ${formatMoney(item.subtotal)}\n\n`;
+        }
+    });
+
+    if(!hidePrices) {
+        msg += `─────────────────────\n`;
+        msg += `💰 *VALOR TOTAL: ${formatMoney(total)}*\n`;
+        msg += `─────────────────────\n\n`;
+    }
+
+    if(footer) msg += `${footer}`;
+
+    return msg;
+};
+
+const generateBudgetImage = async ({ hidePrices = false } = {}) => {
+    const client = document.getElementById('client-name').value || 'Cliente';
+    const project = document.getElementById('client-project').value || 'Obra';
+    const footer = document.getElementById('msg-footer').value;
+    const date = new Date().toLocaleDateString('pt-BR');
+    const { items, total } = getCurrentBudgetDetails();
+    const footerLines = String(footer || '').split('\n').filter(Boolean).length;
+    const canvas = document.createElement('canvas');
+    const width = 1080;
+    const rowHeight = hidePrices ? 78 : 112;
+    const totalBlockHeight = hidePrices ? 0 : 180;
+    const height = Math.max(900, 560 + (items.length * (rowHeight + 28)) + totalBlockHeight + (footerLines * 42));
+
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = '#1d4ed8';
+    ctx.fillRect(0, 0, width, 190);
+
+    if(state.companyLogo) {
+        try {
+            const logo = await loadImageFromDataURL(state.companyLogo);
+            const logoBox = 118;
+            const scale = Math.min(logoBox / logo.width, logoBox / logo.height);
+            const logoW = logo.width * scale;
+            const logoH = logo.height * scale;
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(56, 36, logoBox, logoBox);
+            ctx.drawImage(logo, 56 + ((logoBox - logoW) / 2), 36 + ((logoBox - logoH) / 2), logoW, logoH);
+        } catch {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '700 54px Inter, Arial';
+            ctx.fillText('MO', 76, 112);
+        }
+    } else {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '700 54px Inter, Arial';
+        ctx.fillText('MO', 64, 112);
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 46px Inter, Arial';
+    ctx.fillText(hidePrices ? 'QUANTITATIVO DE OBRA' : 'ORÇAMENTO DE OBRA', 210, 86);
+    ctx.font = '500 27px Inter, Arial';
+    ctx.fillText(`Emitido em ${date}`, 210, 132);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(56, 230, width - 112, 146);
+    ctx.fillStyle = '#111827';
+    ctx.font = '700 34px Inter, Arial';
+    ctx.fillText(fitCanvasText(ctx, client, width - 172), 86, 292);
+    ctx.fillStyle = '#4b5563';
+    ctx.font = '500 27px Inter, Arial';
+    ctx.fillText(fitCanvasText(ctx, project, width - 172), 86, 338);
+
+    let y = 438;
+    ctx.fillStyle = '#111827';
+    ctx.font = '700 32px Inter, Arial';
+    ctx.fillText('Serviços', 56, y);
+    y += 28;
+
+    items.forEach((item, index) => {
+        y += 28;
+        ctx.fillStyle = index % 2 === 0 ? '#ffffff' : '#f1f5f9';
+        ctx.fillRect(56, y - 28, width - 112, rowHeight);
+
+        ctx.fillStyle = '#111827';
+        ctx.font = '700 28px Inter, Arial';
+        ctx.fillText(fitCanvasText(ctx, item.desc, 900), 86, y + 18);
+
+        ctx.fillStyle = '#4b5563';
+        ctx.font = '500 24px Inter, Arial';
+        if(hidePrices) {
+            ctx.fillText(`Quantidade: ${item.qty} ${item.unit}`, 86, y + 56);
+        } else {
+            ctx.fillText(`${item.qty} ${item.unit} x ${formatMoney(item.value)}`, 86, y + 56);
+            ctx.fillStyle = '#047857';
+            ctx.font = '700 27px Inter, Arial';
+            ctx.fillText(formatMoney(item.subtotal), 760, y + 56);
+        }
+
+        y += rowHeight;
+    });
+
+    if(!hidePrices) {
+        y += 34;
+        ctx.fillStyle = '#dcfce7';
+        ctx.fillRect(56, y, width - 112, 96);
+        ctx.fillStyle = '#166534';
+        ctx.font = '700 32px Inter, Arial';
+        ctx.fillText('Valor total', 86, y + 60);
+        ctx.font = '700 38px Inter, Arial';
+        ctx.fillText(formatMoney(total), 710, y + 60);
+        y += 138;
+    } else {
+        y += 42;
+    }
+
+    if(footer) {
+        ctx.fillStyle = '#374151';
+        ctx.font = '500 24px Inter, Arial';
+        wrapCanvasText(ctx, footer, 56, y, width - 112, 34);
+    }
+
+    return canvasToFile(canvas, hidePrices ? 'quantitativo-de-obra.png' : 'orcamento-de-obra.png');
+};
+
+const shareBudgetImage = async (msg, imageFile) => {
     const shareData = {
         title: 'Orçamento de Obra',
         text: msg,
-        files: [logoFile]
+        files: [imageFile]
     };
 
     if(navigator.share && navigator.canShare && navigator.canShare(shareData)) {
@@ -323,47 +534,25 @@ document.getElementById('btn-remove-logo').addEventListener('click', () => {
 
 document.getElementById('btn-whatsapp').addEventListener('click', async () => {
     if(currentBudgetItems.length === 0) return alert('Adicione itens ao orçamento!');
-    
-    const client = document.getElementById('client-name').value || 'Cliente';
-    const project = document.getElementById('client-project').value || 'Obra';
-    const intro = document.getElementById('msg-intro').value;
-    const footer = document.getElementById('msg-footer').value;
-    const date = new Date().toLocaleDateString('pt-BR');
 
-    let msg = `*🏗 ORÇAMENTO DE OBRA 🏗*\n\n`;
-    if(intro) msg += `${intro}\n\n`;
-    
-    msg += `👤 Cliente: ${client}\n`;
-    msg += `🏠 Obra: ${project}\n`;
-    msg += `📅 Data: ${date}\n\n`;
-    msg += `📋 DETALHAMENTO DOS SERVIÇOS:\n\n`;
-    
-    let total = 0;
-    currentBudgetItems.forEach(item => {
-        const s = state.services.find(serv => serv.id == item.serviceId);
-        if(s) {
-            const sub = item.qty * s.value;
-            total += sub;
-            msg += `🔸 ${s.desc}\n`;
-            msg += `   ${item.qty} ${s.unit} x ${formatMoney(s.value)}\n`;
-            msg += `   Subtotal: ${formatMoney(sub)}\n\n`;
-        }
-    });
+    const hidePrices = document.getElementById('hide-budget-prices').checked;
+    const msg = buildBudgetMessage({ hidePrices });
 
-    msg += `─────────────────────\n`;
-    msg += `💰 *VALOR TOTAL: ${formatMoney(total)}*\n`;
-    msg += `─────────────────────\n\n`;
-    if(footer) msg += `${footer}`;
-    
-    if(state.companyLogo) {
+    try {
+        const imageFile = await generateBudgetImage({ hidePrices });
+        const shared = await shareBudgetImage(msg, imageFile);
+        if(shared) return;
+    } catch {
+        alert('Não foi possível gerar a imagem do orçamento. Vou abrir o WhatsApp com o texto.');
+    }
+
+    if(navigator.share) {
         try {
-            const shared = await shareBudgetWithLogo(msg);
-            if(shared) return;
+            await navigator.share({ title: 'Orçamento de Obra', text: msg });
+            return;
         } catch {
             return;
         }
-
-        alert('Este navegador não permite anexar a logo automaticamente. Vou abrir o WhatsApp com o texto do orçamento; anexe a logo manualmente.');
     }
 
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
