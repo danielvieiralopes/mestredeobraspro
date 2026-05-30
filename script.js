@@ -9,7 +9,8 @@ const STORAGE_KEYS = {
     workLogs: 'obras_workLogs',
     vales: 'obras_vales',
     currentDraft: 'obras_currentBudgetDraft',
-    companyLogo: 'obras_companyLogo'
+    companyLogo: 'obras_companyLogo',
+    messageSettings: 'obras_messageSettings'
 };
 
 const loadJSON = (key, fallback) => {
@@ -29,6 +30,12 @@ const initialServices = [
     { id: 5, desc: 'Assentamento Piso', unit: 'm²', value: 60.00 }
 ];
 
+const defaultMessageSettings = {
+    intro: 'Olá segue o orçamento conforme combinado!',
+    footer: '⚠ Este orçamento refere-se apenas à mão de obra. Materiais não inclusos.\n✅ Válido por 15 dias.',
+    hidePrices: false
+};
+
 let state = {
     services: loadJSON(STORAGE_KEYS.services, initialServices),
     savedBudgets: loadJSON(STORAGE_KEYS.budgets, []),
@@ -36,7 +43,11 @@ let state = {
     workers: loadJSON(STORAGE_KEYS.workers, []),
     workLogs: loadJSON(STORAGE_KEYS.workLogs, []),
     vales: loadJSON(STORAGE_KEYS.vales, []),
-    companyLogo: localStorage.getItem(STORAGE_KEYS.companyLogo) || ''
+    companyLogo: localStorage.getItem(STORAGE_KEYS.companyLogo) || '',
+    messageSettings: {
+        ...defaultMessageSettings,
+        ...loadJSON(STORAGE_KEYS.messageSettings, {})
+    }
 };
 
 const budgetDraft = loadJSON(STORAGE_KEYS.currentDraft, { client: '', project: '', items: [] });
@@ -68,8 +79,28 @@ const saveData = () => {
     localStorage.setItem(STORAGE_KEYS.workers, JSON.stringify(state.workers));
     localStorage.setItem(STORAGE_KEYS.workLogs, JSON.stringify(state.workLogs));
     localStorage.setItem(STORAGE_KEYS.vales, JSON.stringify(state.vales));
+    localStorage.setItem(STORAGE_KEYS.messageSettings, JSON.stringify(state.messageSettings));
     if(state.companyLogo) localStorage.setItem(STORAGE_KEYS.companyLogo, state.companyLogo);
     else localStorage.removeItem(STORAGE_KEYS.companyLogo);
+};
+
+const renderMessageSettings = () => {
+    const intro = document.getElementById('msg-intro');
+    const footer = document.getElementById('msg-footer');
+    const hidePrices = document.getElementById('hide-budget-prices');
+
+    if(intro) intro.value = state.messageSettings.intro || '';
+    if(footer) footer.value = state.messageSettings.footer || '';
+    if(hidePrices) hidePrices.checked = Boolean(state.messageSettings.hidePrices);
+};
+
+const persistMessageSettings = () => {
+    state.messageSettings = {
+        intro: document.getElementById('msg-intro')?.value || '',
+        footer: document.getElementById('msg-footer')?.value || '',
+        hidePrices: Boolean(document.getElementById('hide-budget-prices')?.checked)
+    };
+    saveData();
 };
 
 const renderCompanyLogo = () => {
@@ -532,6 +563,10 @@ document.getElementById('btn-remove-logo').addEventListener('click', () => {
     renderCompanyLogo();
 });
 
+document.getElementById('msg-intro').addEventListener('input', persistMessageSettings);
+document.getElementById('msg-footer').addEventListener('input', persistMessageSettings);
+document.getElementById('hide-budget-prices').addEventListener('change', persistMessageSettings);
+
 document.getElementById('btn-whatsapp').addEventListener('click', async () => {
     if(currentBudgetItems.length === 0) return alert('Adicione itens ao orçamento!');
 
@@ -815,6 +850,7 @@ window.deleteWorker = (id) => {
 
 renderServices();
 renderCompanyLogo();
+renderMessageSettings();
 
 document.getElementById('client-name').value = budgetDraft.client || '';
 document.getElementById('client-project').value = budgetDraft.project || '';
